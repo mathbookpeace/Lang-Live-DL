@@ -28,6 +28,7 @@ const (
 
 func main() {
 	fmt.Println("love kuri")
+
 	readConfig()
 	createFolders()
 
@@ -132,8 +133,8 @@ func writeRespToFile(member *memberData, outfilePath string, resp *http.Response
 	defer outfile.Close()
 
 	if member.EnableNotify {
-		if err := beeep.Notify("stream start", member.Name, fmt.Sprintf("assets/%v.jpg", member.Name)); err != nil {
-			fmt.Printf("Notify error = %v", err)
+		if err := beeep.Alert("stream start", member.Name, ""); err != nil {
+			fmt.Printf("Alert error = %v", err)
 		}
 	}
 	n, err := io.Copy(outfile, resp.Body)
