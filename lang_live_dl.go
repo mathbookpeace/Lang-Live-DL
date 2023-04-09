@@ -35,6 +35,9 @@ type configs struct {
 const (
 	defaultFolderPath = "data"
 	tempFolderPath    = "temp"
+
+	defaultConfigJson = "default_config.json"
+	configJson        = "config.json"
 )
 
 func main() {
@@ -60,7 +63,7 @@ func main() {
 }
 
 func readConfig() configs {
-	data, err := os.ReadFile("config.json")
+	data, err := os.ReadFile(decideConfigFile())
 	if err != nil {
 		panic(err)
 	}
@@ -69,6 +72,13 @@ func readConfig() configs {
 		panic(err)
 	}
 	return configs
+}
+
+func decideConfigFile() string {
+	if _, err := os.Stat(configJson); !os.IsNotExist(err) {
+		return configJson
+	}
+	return defaultConfigJson
 }
 
 func createFolders() {
