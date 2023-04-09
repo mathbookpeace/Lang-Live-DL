@@ -15,15 +15,26 @@ import (
 )
 
 type memberData struct {
-	Id           int    `json:"id"`
-	Name         string `json:"name"`
-	EnableNotify bool   `json:"enable_notify"`
-	IconPath     string `json:"icon"`
+	Id           int     `json:"id"`
+	Name         string  `json:"name"`
+	EnableNotify bool    `json:"enable_notify"`
+	IconPath     string  `json:"icon"`
+	Folder       *string `json:"folder"`
+	Prefix       *string `json:"prefix"`
+}
+
+type defaultConfig struct {
+	DefaultFolder *string `json:"default_folder"`
+}
+
+type configs struct {
+	DefaultConfigs defaultConfig `json:"default_configs"`
+	Members        []memberData  `json:"members"`
 }
 
 const (
-	folderPath     = "data"
-	tempFolderPath = "temp"
+	defaultFolderPath = "data"
+	tempFolderPath    = "temp"
 )
 
 func main() {
@@ -32,40 +43,40 @@ func main() {
 	readConfig()
 	createFolders()
 
-	members := readConfig()
-	downloadTable := initDownloadTable(members)
+	configs := readConfig()
+	downloadTable := initDownloadTable(configs.Members)
 	var downloadTableMtx sync.Mutex
 	threadCount := 0
 
 	for {
-		for _, member := range members {
-			startDownloadThraed(member, &downloadTableMtx, downloadTable, &threadCount)
+		for _, member := range configs.Members {
+			startDownloadThraed(member, configs.DefaultConfigs, &downloadTableMtx, downloadTable, &threadCount)
 		}
-		if threadCount > len(members) {
+		if threadCount > len(configs.Members) {
 			fmt.Printf("current thread cnt = %v\n", threadCount)
 		}
 		time.Sleep(2 * time.Second)
 	}
 }
 
-func readConfig() []memberData {
+func readConfig() configs {
 	data, err := os.ReadFile("config.json")
 	if err != nil {
 		panic(err)
 	}
-	memberData := []memberData{}
-	if err := json.Unmarshal(data, &memberData); err != nil {
+	configs := configs{}
+	if err := json.Unmarshal(data, &configs); err != nil {
 		panic(err)
 	}
-	return memberData
+	return configs
 }
 
 func createFolders() {
-	if err := os.MkdirAll(folderPath, os.ModePerm); err != nil {
-		panic(fmt.Sprintf("create folder error, path = %v, err = %v\n", folderPath, err))
+	if err := os.MkdirAll(defaultFolderPath, os.ModePerm); err != nil {
+		panic(fmt.Sprintf("create folder error, path = %v, err = %v\n", defaultFolderPath, err))
 	}
 	if err := os.MkdirAll(tempFolderPath, os.ModePerm); err != nil {
-		panic(fmt.Sprintf("create folder error, path = %v, err = %v\n", folderPath, err))
+		panic(fmt.Sprintf("create folder error, path = %v, err = %v\n", defaultFolderPath, err))
 	}
 }
 
@@ -77,14 +88,14 @@ func initDownloadTable(members []memberData) map[int]bool {
 	return downloadTable
 }
 
-func startDownloadThraed(member memberData, downloadTableMtx *sync.Mutex, downloadTable map[int]bool, threadCount *int) {
+func startDownloadThraed(member memberData, default_configs defaultConfig, downloadTableMtx *sync.Mutex, downloadTable map[int]bool, threadCount *int) {
 	downloadTableMtx.Lock()
 	defer downloadTableMtx.Unlock()
 	if !downloadTable[member.Id] {
 		downloadTable[member.Id] = true
 		*threadCount += 1
 		go func(member memberData) {
-			downloadForMember(&member)
+			downloadForMember(&member, &default_configs)
 			downloadTableMtx.Lock()
 			defer downloadTableMtx.Unlock()
 			downloadTable[member.Id] = false
@@ -93,13 +104,13 @@ func startDownloadThraed(member memberData, downloadTableMtx *sync.Mutex, downlo
 	}
 }
 
-func downloadForMember(member *memberData) {
-	filename := fmt.Sprintf("%v.%v", member.Name, time.Now().Format("2006.01.02 15.04.05"))
+func downloadForMember(member *memberData, default_configs *defaultConfig) {
+	filename := fmt.Sprintf("%v%v", decideFilePrefix(member), time.Now().Format("2006.01.02 15.04.05"))
 	tempOutfilePath := filepath.Join(tempFolderPath, fmt.Sprintf("%v.flv", filename))
 	if !downloadVideo(member, tempOutfilePath) {
 		return
 	}
-	outfilePath := filepath.Join(folderPath, fmt.Sprintf("%v.mp4", filename))
+	outfilePath := filepath.Join(decideFileFolder(member, default_configs), fmt.Sprintf("%v.mp4", filename))
 	if err := flvToMp4(tempOutfilePath, outfilePath); err != nil {
 		fmt.Printf("flv to mp4 failed, err = %v\n", err)
 		return
@@ -137,6 +148,8 @@ func writeRespToFile(member *memberData, outfilePath string, resp *http.Response
 			fmt.Printf("Alert error = %v", err)
 		}
 	}
+	fmt.Printf("stream start %v\n", member.Name)
+
 	n, err := io.Copy(outfile, resp.Body)
 	if err != nil {
 		fmt.Printf("download failed, name = %v, err = %v\n", member.Name, err)
@@ -149,4 +162,21 @@ func flvToMp4(fromPath, toPath string) error {
 		return err
 	}
 	return os.Remove(fromPath)
+}
+
+func decideFilePrefix(member *memberData) string {
+	if member.Prefix != nil {
+		return *member.Prefix
+	}
+	return fmt.Sprintf("%v.", member.Name)
+}
+
+func decideFileFolder(member *memberData, default_configs *defaultConfig) string {
+	if member.Folder != nil {
+		return *member.Folder
+	}
+	if default_configs.DefaultFolder != nil {
+		return *default_configs.DefaultFolder
+	}
+	return defaultFolderPath
 }
