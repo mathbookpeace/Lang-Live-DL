@@ -25,6 +25,7 @@ type memberData struct {
 
 type defaultConfig struct {
 	DefaultFolder *string `json:"default_folder"`
+	CheckOnly     bool    `json:"check_only"`
 }
 
 type configs struct {
@@ -121,9 +122,16 @@ func downloadForMember(member *memberData, default_configs *defaultConfig) {
 		return
 	}
 	outfilePath := filepath.Join(decideFileFolder(member, default_configs), fmt.Sprintf("%v.mp4", filename))
-	if err := flvToMp4(tempOutfilePath, outfilePath); err != nil {
-		fmt.Printf("flv to mp4 failed, err = %v\n", err)
-		return
+	if !default_configs.CheckOnly {
+		if err := flvToMp4(tempOutfilePath, outfilePath); err != nil {
+			fmt.Printf("flv to mp4 failed, err = %v\n", err)
+			return
+		}
+	} else {
+		if err := os.Remove(tempOutfilePath); err != nil {
+			fmt.Printf("remove file failed, err = %v", err)
+			return
+		}
 	}
 	fmt.Printf("download completed, name = %v\n", member.Name)
 }
