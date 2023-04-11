@@ -54,7 +54,7 @@ func main() {
 
 	for {
 		for _, member := range configs.Members {
-			startDownloadThraed(member, configs.DefaultConfigs, &downloadTableMtx, downloadTable, &threadCount)
+			startDownloadThread(member, configs.DefaultConfigs, &downloadTableMtx, downloadTable, &threadCount)
 		}
 		if threadCount > len(configs.Members) {
 			fmt.Printf("current thread cnt = %v\n", threadCount)
@@ -99,7 +99,7 @@ func initDownloadTable(members []memberData) map[int]bool {
 	return downloadTable
 }
 
-func startDownloadThraed(member memberData, default_configs defaultConfig, downloadTableMtx *sync.Mutex, downloadTable map[int]bool, threadCount *int) {
+func startDownloadThread(member memberData, default_configs defaultConfig, downloadTableMtx *sync.Mutex, downloadTable map[int]bool, threadCount *int) {
 	downloadTableMtx.Lock()
 	defer downloadTableMtx.Unlock()
 	if !downloadTable[member.Id] {
