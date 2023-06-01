@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 
@@ -137,7 +139,11 @@ func downloadForMember(member *memberData, default_configs *defaultConfig) {
 }
 
 func downloadVideo(member *memberData, outfilePath string) bool {
-	url := fmt.Sprintf("https://video-ws-hls-aws.lv-play.com/live/%vY.flv", member.Id)
+	url, err := getVideoUrl(member)
+	if err != nil {
+		fmt.Printf("get video url failed, err = %v", err)
+		return false
+	}
 	resp, err := http.Get(url)
 	if err != nil {
 		fmt.Printf("http get failed, name = %v, err = %v\n", member.Name, err)
@@ -151,6 +157,34 @@ func downloadVideo(member *memberData, outfilePath string) bool {
 		return false
 	}
 	return writeRespToFile(member, outfilePath, resp)
+}
+
+func getVideoUrl(member *memberData) (string, error) {
+	mainPage := fmt.Sprintf("https://www.lang.live/room/%v", member.Id)
+	content, err := getWebContent(mainPage)
+	if err != nil {
+		return "", err
+	}
+	re := regexp.MustCompile("https://[^\"]*.lv-play.com") // compile the regex
+	domain := re.FindString(content)
+	if domain == "" {
+		return "", fmt.Errorf("video domain not found")
+	}
+	return fmt.Sprintf("%v/live/%vY.flv", domain, member.Id), nil
+}
+
+func getWebContent(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 }
 
 func writeRespToFile(member *memberData, outfilePath string, resp *http.Response) bool {
