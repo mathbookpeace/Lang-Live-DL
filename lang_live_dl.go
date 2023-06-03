@@ -143,6 +143,8 @@ func downloadVideo(member *memberData, outfilePath string) bool {
 	if err != nil {
 		fmt.Printf("get video url failed, err = %v", err)
 		return false
+	} else if url == "" {
+		return false
 	}
 	resp, err := http.Get(url)
 	if err != nil {
@@ -168,7 +170,7 @@ func getVideoUrl(member *memberData) (string, error) {
 	re := regexp.MustCompile("https://[^\"]*.lv-play.com") // compile the regex
 	domain := re.FindString(content)
 	if domain == "" {
-		return "", fmt.Errorf("video domain not found")
+		return "", nil
 	}
 	return fmt.Sprintf("%v/live/%vY.flv", domain, member.Id), nil
 }
