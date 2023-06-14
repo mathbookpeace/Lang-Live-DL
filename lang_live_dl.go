@@ -61,7 +61,7 @@ func main() {
 		if threadCount > len(configs.Members) {
 			fmt.Printf("current thread cnt = %v\n", threadCount)
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(5 * time.Second)
 	}
 }
 
