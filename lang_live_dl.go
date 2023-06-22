@@ -138,7 +138,7 @@ func downloadForMember(member *memberData, default_configs *defaultConfig) {
 
 func downloadVideo(member *memberData, outfilePath string) bool {
 	domains := []string{"video-ws-aws", "video-ws-hls-aws", "video-tx-int"}
-	for domain := range domains {
+	for _, domain := range domains {
 		url := fmt.Sprintf("https://%v.lv-play.com/live/%vY.flv", domain, member.Id)
 		resp, err := http.Get(url)
 		if err != nil {
