@@ -137,20 +137,27 @@ func downloadForMember(member *memberData, default_configs *defaultConfig) {
 }
 
 func downloadVideo(member *memberData, outfilePath string) bool {
-	url := fmt.Sprintf("https://video-ws-hls-aws.lv-play.com/live/%vY.flv", member.Id)
-	resp, err := http.Get(url)
-	if err != nil {
-		fmt.Printf("http get failed, name = %v, err = %v\n", member.Name, err)
-		return false
+	domains := []string{"video-ws-aws", "video-ws-hls-aws", "video-tx-int"}
+	for domain := range domains {
+		url := fmt.Sprintf("https://%v.lv-play.com/live/%vY.flv", domain, member.Id)
+		resp, err := http.Get(url)
+		if err != nil {
+			fmt.Printf("http get failed, name = %v, err = %v\n", member.Name, err)
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 404 {
+			continue
+		} else if resp.StatusCode != 200 {
+			fmt.Printf("status = %v\n", resp.Status)
+			continue
+		}
+		if !writeRespToFile(member, outfilePath, resp) {
+			continue
+		}
+		return true
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 404 {
-		return false
-	} else if resp.StatusCode != 200 {
-		fmt.Printf("status = %v\n", resp.Status)
-		return false
-	}
-	return writeRespToFile(member, outfilePath, resp)
+	return false
 }
 
 func writeRespToFile(member *memberData, outfilePath string, resp *http.Response) bool {
