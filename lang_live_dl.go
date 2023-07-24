@@ -34,9 +34,12 @@ type configs struct {
 }
 
 type streamSource struct {
-	url      string
-	filename string
-	member   *memberData
+	name         string
+	url          string
+	filename     string
+	fileFolder   string
+	checkOnly    bool
+	enableNotify bool
 }
 
 const (
@@ -54,20 +57,10 @@ func main() {
 	createFolders()
 
 	configs := readConfig()
-	sources := buildStreamSources(configs.Members)
+	sources := buildStreamSources(configs)
 	downloadTable := initDownloadTable(sources)
-	var downloadTableMtx sync.Mutex
-	threadCount := 0
 
-	for {
-		for _, src := range sources {
-			startDownloadThread(&src, configs.DefaultConfigs, &downloadTableMtx, downloadTable, &threadCount)
-		}
-		if threadCount > len(sources) {
-			fmt.Printf("current thread cnt = %v\n", threadCount)
-		}
-		time.Sleep(2 * time.Second)
-	}
+	startDownloadThread(sources, downloadTable)
 }
 
 func readConfig() configs {
@@ -106,17 +99,20 @@ func initDownloadTable(sources []streamSource) map[string]bool {
 	return downloadTable
 }
 
-func buildStreamSources(members []memberData) []streamSource {
+func buildStreamSources(configs configs) []streamSource {
 	var sources []streamSource
 	domains := []string{"video-ws-aws", "video-ws-hls-aws", "video-tx-int", "audio-tx-lh2"}
-	for _, member := range members {
+	for _, member := range configs.Members {
 		idx := 0
 		for _, domain := range domains {
 			for _, filenamePostfix := range []string{"Y", "A"} {
 				sources = append(sources, streamSource{
-					url:      fmt.Sprintf("https://%v.lv-play.com/live/%v%v.flv", domain, member.Id, filenamePostfix),
-					member:   &member,
-					filename: fmt.Sprintf("%vi%v.", decideFilePrefix(&member), idx),
+					name:         member.Name,
+					url:          fmt.Sprintf("https://%v.lv-play.com/live/%v%v.flv", domain, member.Id, filenamePostfix),
+					filename:     fmt.Sprintf("%vi%v.", decideFilePrefix(&member), idx),
+					fileFolder:   decideFileFolder(&member, &configs.DefaultConfigs),
+					checkOnly:    configs.DefaultConfigs.CheckOnly,
+					enableNotify: member.EnableNotify,
 				})
 				idx += 1
 			}
@@ -125,30 +121,43 @@ func buildStreamSources(members []memberData) []streamSource {
 	return sources
 }
 
-func startDownloadThread(src *streamSource, default_configs defaultConfig, downloadTableMtx *sync.Mutex, downloadTable map[string]bool, threadCount *int) {
-	downloadTableMtx.Lock()
-	defer downloadTableMtx.Unlock()
-	if !downloadTable[src.url] {
-		downloadTable[src.url] = true
-		*threadCount += 1
-		go func(src streamSource) {
-			downloadForMember(&src, &default_configs)
-			downloadTableMtx.Lock()
-			defer downloadTableMtx.Unlock()
-			downloadTable[src.url] = false
-			*threadCount -= 1
-		}(*src)
+func startDownloadThread(sources []streamSource, downloadTable map[string]bool) {
+	var downloadTableMtx sync.Mutex
+	threadCount := 0
+	threadLimit := len(sources)
+	for {
+		for _, src := range sources {
+			func() {
+				downloadTableMtx.Lock()
+				defer downloadTableMtx.Unlock()
+				if !downloadTable[src.url] {
+					downloadTable[src.url] = true
+					threadCount += 1
+					if threadCount > threadLimit {
+						fmt.Printf("current thread cnt = %v\n", threadCount)
+					}
+					go func(src streamSource) {
+						downloadForMember(&src)
+						downloadTableMtx.Lock()
+						defer downloadTableMtx.Unlock()
+						downloadTable[src.url] = false
+						threadCount -= 1
+					}(src)
+				}
+			}()
+		}
+		time.Sleep(2 * time.Second)
 	}
 }
 
-func downloadForMember(src *streamSource, default_configs *defaultConfig) {
+func downloadForMember(src *streamSource) {
 	filename := fmt.Sprintf("%v%v", src.filename, time.Now().Format("2006.01.02 15.04.05"))
 	tempOutfilePath := filepath.Join(tempFolderPath, fmt.Sprintf("%v.flv", filename))
 	if !downloadVideo(src, tempOutfilePath) {
 		return
 	}
-	outfilePath := filepath.Join(decideFileFolder(src.member, default_configs), fmt.Sprintf("%v.mp4", filename))
-	if !default_configs.CheckOnly {
+	outfilePath := filepath.Join(src.fileFolder, fmt.Sprintf("%v.mp4", filename))
+	if !src.checkOnly {
 		if err := flvToMp4(tempOutfilePath, outfilePath); err != nil {
 			fmt.Printf("flv to mp4 failed, err = %v\n", err)
 			return
@@ -159,13 +168,13 @@ func downloadForMember(src *streamSource, default_configs *defaultConfig) {
 			return
 		}
 	}
-	fmt.Printf("download completed, name = %v\n", src.member.Name)
+	fmt.Printf("download completed, name = %v\n", src.name)
 }
 
 func downloadVideo(src *streamSource, outfilePath string) bool {
 	resp, err := http.Get(src.url)
 	if err != nil {
-		fmt.Printf("http get failed, name = %v, err = %v\n", src.member.Name, err)
+		fmt.Printf("http get failed, name = %v, err = %v\n", src.name, err)
 		return false
 	}
 	defer resp.Body.Close()
@@ -176,13 +185,13 @@ func downloadVideo(src *streamSource, outfilePath string) bool {
 		return false
 	}
 	fmt.Println(src)
-	if !writeRespToFile(src.member, outfilePath, resp) {
+	if !writeRespToFile(src, outfilePath, resp) {
 		return false
 	}
 	return true
 }
 
-func writeRespToFile(member *memberData, outfilePath string, resp *http.Response) bool {
+func writeRespToFile(src *streamSource, outfilePath string, resp *http.Response) bool {
 	outfile, err := os.Create(outfilePath)
 	if err != nil {
 		fmt.Printf("create file error, path = %v, err = %v\n", outfilePath, err)
@@ -190,16 +199,16 @@ func writeRespToFile(member *memberData, outfilePath string, resp *http.Response
 	}
 	defer outfile.Close()
 
-	if member.EnableNotify {
-		if err := beeep.Alert("stream start", member.Name, ""); err != nil {
+	if src.enableNotify {
+		if err := beeep.Alert("stream start", src.name, ""); err != nil {
 			fmt.Printf("Alert error = %v", err)
 		}
 	}
-	fmt.Printf("stream start %v\n", member.Name)
+	fmt.Printf("stream start %v\n", src.name)
 
 	n, err := io.Copy(outfile, resp.Body)
 	if err != nil {
-		fmt.Printf("download failed, name = %v, err = %v\n", member.Name, err)
+		fmt.Printf("download failed, name = %v, err = %v\n", src.name, err)
 	}
 	return n > 0
 }
@@ -218,12 +227,12 @@ func decideFilePrefix(member *memberData) string {
 	return fmt.Sprintf("%v.", member.Name)
 }
 
-func decideFileFolder(member *memberData, default_configs *defaultConfig) string {
+func decideFileFolder(member *memberData, config *defaultConfig) string {
 	if member.Folder != nil {
 		return *member.Folder
 	}
-	if default_configs.DefaultFolder != nil {
-		return *default_configs.DefaultFolder
+	if config.DefaultFolder != nil {
+		return *config.DefaultFolder
 	}
 	return defaultFolderPath
 }
