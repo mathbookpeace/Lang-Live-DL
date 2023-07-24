@@ -138,8 +138,15 @@ func downloadForMember(member *memberData, default_configs *defaultConfig) {
 
 func downloadVideo(member *memberData, outfilePath string) bool {
 	domains := []string{"video-ws-aws", "video-ws-hls-aws", "video-tx-int", "audio-tx-lh2"}
+	var urls []string
 	for _, domain := range domains {
-		url := fmt.Sprintf("https://%v.lv-play.com/live/%vY.flv", domain, member.Id)
+		for _, filenamePostfix := range []string{"Y", "A"} {
+			url := fmt.Sprintf("https://%v.lv-play.com/live/%v%v.flv", domain, member.Id, filenamePostfix)
+			urls = append(urls, url)
+		}
+	}
+	for _, url := range urls {
+
 		resp, err := http.Get(url)
 		if err != nil {
 			fmt.Printf("http get failed, name = %v, err = %v\n", member.Name, err)
