@@ -1,6 +1,7 @@
 {
     "default_configs": {
-      "check_only": false
+        "check_only": false,
+        "default_folder": "/yter/tp/src/tp/tp stream"
     },
     "members": [
       {
