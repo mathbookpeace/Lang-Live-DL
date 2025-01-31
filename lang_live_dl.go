@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sync"
 	"time"
@@ -181,6 +182,10 @@ func downloadVideo(src *streamSource) {
 }
 
 func toFinalMp4(fromPath, toPath string) error {
+	dir := path.Dir(toPath)
+	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
+		panic(fmt.Sprintf("create final folder error, path = %v, err = %v\n", dir, err))
+	}
 	if err := exec.Command("ffmpeg", "-i", fromPath, "-codec", "copy", toPath).Run(); err != nil {
 		return err
 	}
