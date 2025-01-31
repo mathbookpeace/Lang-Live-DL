@@ -140,6 +140,7 @@ func startDownloadThread(configs configs, downloadTable map[int]bool) {
 						threadCount -= 1
 					}(configs.DefaultConfigs, member)
 				}
+				time.Sleep(1300 * time.Millisecond)
 			}()
 		}
 		time.Sleep(5300 * time.Millisecond)
