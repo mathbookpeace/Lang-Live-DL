@@ -3,15 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
-
-	"github.com/gen2brain/beeep"
 )
 
 type memberData struct {
@@ -51,19 +47,16 @@ const (
 )
 
 func main() {
-	fmt.Println("love kuri")
-
-	readConfig()
+	readConfigs()
 	createFolders()
 
-	configs := readConfig()
-	sources := buildStreamSources(configs)
-	downloadTable := initDownloadTable(sources)
+	configs := readConfigs()
+	downloadTable := initDownloadTable(configs.Members)
 
-	startDownloadThread(sources, downloadTable)
+	startDownloadThread(configs, downloadTable)
 }
 
-func readConfig() configs {
+func readConfigs() configs {
 	data, err := os.ReadFile(decideConfigFile())
 	if err != nil {
 		panic(err)
@@ -91,27 +84,29 @@ func createFolders() {
 	}
 }
 
-func initDownloadTable(sources []streamSource) map[string]bool {
-	downloadTable := map[string]bool{}
-	for _, src := range sources {
-		downloadTable[src.url] = false
+func initDownloadTable(members []memberData) map[int]bool {
+	downloadTable := map[int]bool{}
+	for _, member := range members {
+		downloadTable[member.Id] = false
 	}
 	return downloadTable
 }
 
-func buildStreamSources(configs configs) []streamSource {
+func buildStreamSources(config *defaultConfig, member *memberData) []streamSource {
 	var sources []streamSource
 	domains := []string{"video-ws-aws", "video-ws-hls-aws", "video-tx-int", "audio-tx-lh2"}
-	for _, member := range configs.Members {
-		idx := 0
-		for _, domain := range domains {
-			for _, filenamePostfix := range []string{"Y", "A"} {
+	postfixes := []string{"Y", "A"}
+	exts := []string{"flv", "m3u8"}
+	idx := 0
+	for _, domain := range domains {
+		for _, postfix := range postfixes {
+			for _, ext := range exts {
 				sources = append(sources, streamSource{
 					name:         member.Name,
-					url:          fmt.Sprintf("https://%v.lv-play.com/live/%v%v.flv", domain, member.Id, filenamePostfix),
-					filename:     fmt.Sprintf("%vi%v.", decideFilePrefix(&member), idx),
-					fileFolder:   decideFileFolder(&member, &configs.DefaultConfigs),
-					checkOnly:    configs.DefaultConfigs.CheckOnly,
+					url:          fmt.Sprintf("https://%v.lv-play.com/live/%v%v.%v", domain, member.Id, postfix, ext),
+					filename:     fmt.Sprintf("%vi%v.", decideFilePrefix(member), idx),
+					fileFolder:   decideFileFolder(member, config),
+					checkOnly:    config.CheckOnly,
 					enableNotify: member.EnableNotify,
 				})
 				idx += 1
@@ -121,45 +116,60 @@ func buildStreamSources(configs configs) []streamSource {
 	return sources
 }
 
-func startDownloadThread(sources []streamSource, downloadTable map[string]bool) {
+func startDownloadThread(configs configs, downloadTable map[int]bool) {
 	var downloadTableMtx sync.Mutex
 	threadCount := 0
-	threadLimit := len(sources)
+	threadLimit := len(configs.Members)
 	for {
-		for _, src := range sources {
+		for _, member := range configs.Members {
 			func() {
 				downloadTableMtx.Lock()
 				defer downloadTableMtx.Unlock()
-				if !downloadTable[src.url] {
-					downloadTable[src.url] = true
+				if !downloadTable[member.Id] {
+					downloadTable[member.Id] = true
 					threadCount += 1
 					if threadCount > threadLimit {
 						fmt.Printf("current thread cnt = %v\n", threadCount)
 					}
-					go func(src streamSource) {
-						downloadForMember(&src)
+					go func(config defaultConfig, member memberData) {
+						downloadForMember(&config, &member)
 						downloadTableMtx.Lock()
 						defer downloadTableMtx.Unlock()
-						downloadTable[src.url] = false
+						downloadTable[member.Id] = false
 						threadCount -= 1
-					}(src)
+					}(configs.DefaultConfigs, member)
 				}
 			}()
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(5300 * time.Millisecond)
 	}
 }
 
-func downloadForMember(src *streamSource) {
+func downloadForMember(config *defaultConfig, member *memberData) {
+	var wg sync.WaitGroup
+	for _, src := range buildStreamSources(config, member) {
+		wg.Add(1)
+		go func(src streamSource) {
+			defer wg.Done()
+			downloadVideo(&src)
+		}(src)
+		time.Sleep(1100 * time.Millisecond)
+	}
+	wg.Wait()
+}
+
+func downloadVideo(src *streamSource) {
 	filename := fmt.Sprintf("%v%v", src.filename, time.Now().Format("2006.01.02 15.04.05"))
-	tempOutfilePath := filepath.Join(tempFolderPath, fmt.Sprintf("%v.flv", filename))
-	if !downloadVideo(src, tempOutfilePath) {
+	tempOutfilePath := filepath.Join(tempFolderPath, fmt.Sprintf("%v.mp4", filename))
+	fmt.Printf("%v\n", src.url)
+	if err := exec.Command("ffmpeg", "-i", src.url, "-c", "copy", tempOutfilePath).Run(); err != nil {
+		fmt.Printf("download video failed, name = %v, err = %v\n", src.name, err)
 		return
 	}
-	outfilePath := filepath.Join(src.fileFolder, fmt.Sprintf("%v.mp4", filename))
 	if !src.checkOnly {
-		if err := flvToMp4(tempOutfilePath, outfilePath); err != nil {
-			fmt.Printf("flv to mp4 failed, err = %v\n", err)
+		outfilePath := filepath.Join(src.fileFolder, fmt.Sprintf("%v.mp4", filename))
+		if err := toFinalMp4(tempOutfilePath, outfilePath); err != nil {
+			fmt.Printf("to mp4 failed, err = %v\n", err)
 			return
 		}
 	} else {
@@ -171,49 +181,7 @@ func downloadForMember(src *streamSource) {
 	fmt.Printf("download completed, name = %v\n", src.name)
 }
 
-func downloadVideo(src *streamSource, outfilePath string) bool {
-	resp, err := http.Get(src.url)
-	if err != nil {
-		fmt.Printf("http get failed, name = %v, err = %v\n", src.name, err)
-		return false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 404 {
-		return false
-	} else if resp.StatusCode != 200 {
-		fmt.Printf("status = %v\n", resp.Status)
-		return false
-	}
-	fmt.Println(src)
-	if !writeRespToFile(src, outfilePath, resp) {
-		return false
-	}
-	return true
-}
-
-func writeRespToFile(src *streamSource, outfilePath string, resp *http.Response) bool {
-	outfile, err := os.Create(outfilePath)
-	if err != nil {
-		fmt.Printf("create file error, path = %v, err = %v\n", outfilePath, err)
-		return false
-	}
-	defer outfile.Close()
-
-	if src.enableNotify {
-		if err := beeep.Alert("stream start", src.name, ""); err != nil {
-			fmt.Printf("Alert error = %v", err)
-		}
-	}
-	fmt.Printf("stream start %v\n", src.name)
-
-	n, err := io.Copy(outfile, resp.Body)
-	if err != nil {
-		fmt.Printf("download failed, name = %v, err = %v\n", src.name, err)
-	}
-	return n > 0
-}
-
-func flvToMp4(fromPath, toPath string) error {
+func toFinalMp4(fromPath, toPath string) error {
 	if err := exec.Command("ffmpeg", "-i", fromPath, "-codec", "copy", toPath).Run(); err != nil {
 		return err
 	}
