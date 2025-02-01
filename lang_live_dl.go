@@ -39,12 +39,40 @@ type streamSource struct {
 	enableNotify bool
 }
 
+type urlParam struct {
+	domain  string
+	postfix string
+	ext     string
+}
+
 const (
 	defaultFolderPath = "data"
 	tempFolderPath    = "temp"
 
 	defaultConfigJson = "default_config.json"
 	configJson        = "config.json"
+)
+
+var (
+	possibleUrlParams = func() []urlParam {
+		var params []urlParam
+		domains := []string{"video-ws-aws", "video-ws-hls-aws", "video-tx-int", "audio-tx-lh2"}
+		postfixes := []string{"Y", "A"}
+		exts := []string{"flv", "m3u8"}
+		for _, domain := range domains {
+			for _, postfix := range postfixes {
+				for _, ext := range exts {
+					params = append(params, urlParam{domain, postfix, ext})
+				}
+			}
+		}
+		fmt.Println("Possible Url Params:")
+		for idx, param := range params {
+			fmt.Printf("%v: %v\n", idx, param)
+		}
+		fmt.Println()
+		return params
+	}()
 )
 
 func main() {
@@ -95,24 +123,17 @@ func initDownloadTable(members []memberData) map[int]bool {
 
 func buildStreamSources(config *defaultConfig, member *memberData) []streamSource {
 	var sources []streamSource
-	domains := []string{"video-ws-aws", "video-ws-hls-aws", "video-tx-int", "audio-tx-lh2"}
-	postfixes := []string{"Y", "A"}
-	exts := []string{"flv", "m3u8"}
 	idx := 0
-	for _, domain := range domains {
-		for _, postfix := range postfixes {
-			for _, ext := range exts {
-				sources = append(sources, streamSource{
-					name:         member.Name,
-					url:          fmt.Sprintf("https://%v.lv-play.com/live/%v%v.%v", domain, member.Id, postfix, ext),
-					filename:     fmt.Sprintf("%vi%v.", decideFilePrefix(member), idx),
-					fileFolder:   decideFileFolder(member, config),
-					checkOnly:    config.CheckOnly,
-					enableNotify: member.EnableNotify,
-				})
-				idx += 1
-			}
-		}
+	for _, param := range possibleUrlParams {
+		sources = append(sources, streamSource{
+			name:         member.Name,
+			url:          fmt.Sprintf("https://%v.lv-play.com/live/%v%v.%v", param.domain, member.Id, param.postfix, param.ext),
+			filename:     fmt.Sprintf("%vi%v.", decideFilePrefix(member), idx),
+			fileFolder:   decideFileFolder(member, config),
+			checkOnly:    config.CheckOnly,
+			enableNotify: member.EnableNotify,
+		})
+		idx += 1
 	}
 	return sources
 }
