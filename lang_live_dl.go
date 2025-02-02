@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"time"
+
+	"github.com/gen2brain/beeep"
 )
 
 type memberData struct {
@@ -194,6 +196,7 @@ func pingUrl(url string) bool {
 }
 
 func downloadVideo(src *streamSource) {
+	notify(src)
 	filename := fmt.Sprintf("%v%v", src.filename, time.Now().Format("2006.01.02 15.04.05"))
 	tempOutfilePath := filepath.Join(tempFolderPath, fmt.Sprintf("%v.mp4", filename))
 	if err := exec.Command("ffmpeg", "-i", src.url, "-c", "copy", tempOutfilePath).Run(); err != nil {
@@ -213,6 +216,15 @@ func downloadVideo(src *streamSource) {
 		}
 	}
 	log.Printf("download completed, name = %v\n", src.name)
+}
+
+func notify(src *streamSource) {
+	if src.enableNotify {
+		if err := beeep.Alert("stream start", src.name, ""); err != nil {
+			log.Printf("Alert error = %v", err)
+		}
+	}
+	log.Printf("stream start %v\n", src.name)
 }
 
 func toFinalMp4(fromPath, toPath string) error {
