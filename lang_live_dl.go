@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -54,28 +55,13 @@ const (
 )
 
 var (
-	possibleUrlParams = func() []urlParam {
-		var params []urlParam
-		domains := []string{"video-ws-aws", "video-ws-hls-aws", "video-tx-int", "audio-tx-lh2"}
-		postfixes := []string{"Y", "A"}
-		exts := []string{"flv", "m3u8"}
-		for _, domain := range domains {
-			for _, postfix := range postfixes {
-				for _, ext := range exts {
-					params = append(params, urlParam{domain, postfix, ext})
-				}
-			}
-		}
-		fmt.Println("Possible Url Params:")
-		for idx, param := range params {
-			fmt.Printf("%v: %v\n", idx, param)
-		}
-		fmt.Println()
-		return params
-	}()
+	logFile           = setupLog()
+	possibleUrlParams = setupPossibleUrlParams()
 )
 
 func main() {
+	defer logFile.Close()
+
 	readConfigs()
 	createFolders()
 
@@ -83,6 +69,36 @@ func main() {
 	downloadTable := initDownloadTable(configs.Members)
 
 	startDownloadThread(configs, downloadTable)
+}
+
+func setupLog() *os.File {
+	logFile, err := os.Create("lang_live_dl.log")
+	if err != nil {
+		log.Fatalf("error opening file: %v", err)
+	}
+
+	log.SetOutput(logFile)
+	return logFile
+}
+
+func setupPossibleUrlParams() []urlParam {
+	var params []urlParam
+	domains := []string{"video-ws-aws", "video-ws-hls-aws", "video-tx-int", "audio-tx-lh2"}
+	postfixes := []string{"Y", "A"}
+	exts := []string{"flv", "m3u8"}
+	for _, domain := range domains {
+		for _, postfix := range postfixes {
+			for _, ext := range exts {
+				params = append(params, urlParam{domain, postfix, ext})
+			}
+		}
+	}
+	log.Println("Possible Url Params:")
+	for idx, param := range params {
+		log.Printf("%v: %v\n", idx, param)
+	}
+	log.Println()
+	return params
 }
 
 func readConfigs() configs {
@@ -151,7 +167,7 @@ func startDownloadThread(configs configs, downloadTable map[int]bool) {
 					downloadTable[member.Id] = true
 					threadCount += 1
 					if threadCount > threadLimit {
-						fmt.Printf("current thread cnt = %v\n", threadCount)
+						log.Printf("current thread cnt = %v\n", threadCount)
 					}
 					go func(config defaultConfig, member memberData) {
 						downloadForMember(&config, &member)
@@ -185,22 +201,22 @@ func downloadVideo(src *streamSource) {
 	filename := fmt.Sprintf("%v%v", src.filename, time.Now().Format("2006.01.02 15.04.05"))
 	tempOutfilePath := filepath.Join(tempFolderPath, fmt.Sprintf("%v.mp4", filename))
 	if err := exec.Command("ffmpeg", "-i", src.url, "-c", "copy", tempOutfilePath).Run(); err != nil {
-		fmt.Printf("download video failed, name = %v, err = %v\n", src.name, err)
+		log.Printf("download video failed, name = %v, err = %v\n", src.name, err)
 		return
 	}
 	if !src.checkOnly {
 		outfilePath := filepath.Join(src.fileFolder, fmt.Sprintf("%v.mp4", filename))
 		if err := toFinalMp4(tempOutfilePath, outfilePath); err != nil {
-			fmt.Printf("to mp4 failed, err = %v\n", err)
+			log.Printf("to mp4 failed, err = %v\n", err)
 			return
 		}
 	} else {
 		if err := os.Remove(tempOutfilePath); err != nil {
-			fmt.Printf("remove file failed, err = %v", err)
+			log.Printf("remove file failed, err = %v", err)
 			return
 		}
 	}
-	fmt.Printf("download completed, name = %v\n", src.name)
+	log.Printf("download completed, name = %v\n", src.name)
 }
 
 func toFinalMp4(fromPath, toPath string) error {
