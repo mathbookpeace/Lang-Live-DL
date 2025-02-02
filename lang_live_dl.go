@@ -66,9 +66,10 @@ func main() {
 	createFolders()
 
 	configs := readConfigs()
-	downloadTable := initDownloadTable(configs.Members)
+	sources := buildStreamSources(configs)
+	downloadTable := initDownloadTable(sources)
 
-	startDownloadThread(configs, downloadTable)
+	startDownloadThread(sources, downloadTable)
 }
 
 func setupLog() *os.File {
@@ -129,79 +130,66 @@ func createFolders() {
 	}
 }
 
-func initDownloadTable(members []memberData) map[int]bool {
-	downloadTable := map[int]bool{}
-	for _, member := range members {
-		downloadTable[member.Id] = false
+func initDownloadTable(sources []streamSource) []bool {
+	downloadTable := make([]bool, len(sources))
+	for i := 0; i < len(sources); i++ {
+		downloadTable[i] = false
 	}
 	return downloadTable
 }
 
-func buildStreamSources(config *defaultConfig, member *memberData) []streamSource {
+func buildStreamSources(configs configs) []streamSource {
 	var sources []streamSource
-	idx := 0
-	for _, param := range possibleUrlParams {
-		sources = append(sources, streamSource{
-			name:         member.Name,
-			url:          fmt.Sprintf("https://%v.lv-play.com/live/%v%v.%v", param.domain, member.Id, param.postfix, param.ext),
-			filename:     fmt.Sprintf("%vi%v.", decideFilePrefix(member), idx),
-			fileFolder:   decideFileFolder(member, config),
-			checkOnly:    config.CheckOnly,
-			enableNotify: member.EnableNotify,
-		})
-		idx += 1
+	for _, member := range configs.Members {
+		idx := 0
+		for _, param := range possibleUrlParams {
+			sources = append(sources, streamSource{
+				name:         member.Name,
+				url:          fmt.Sprintf("https://%v.lv-play.com/live/%v%v.%v", param.domain, member.Id, param.postfix, param.ext),
+				filename:     fmt.Sprintf("%vi%v.", decideFilePrefix(&member), idx),
+				fileFolder:   decideFileFolder(&member, &configs.DefaultConfigs),
+				checkOnly:    configs.DefaultConfigs.CheckOnly,
+				enableNotify: member.EnableNotify,
+			})
+			idx += 1
+		}
 	}
+	log.Println("All stream sources:")
+	for i, src := range sources {
+		log.Printf("%v: %v - %v - %v", i, src.name, src.filename, src.url)
+	}
+	log.Println("")
 	return sources
 }
 
-func startDownloadThread(configs configs, downloadTable map[int]bool) {
+func startDownloadThread(sources []streamSource, downloadTable []bool) {
 	var downloadTableMtx sync.Mutex
-	threadCount := 0
-	threadLimit := len(configs.Members)
 	for {
-		for _, member := range configs.Members {
+		for idx, src := range sources {
 			func() {
 				downloadTableMtx.Lock()
 				defer downloadTableMtx.Unlock()
-				if !downloadTable[member.Id] {
-					downloadTable[member.Id] = true
-					threadCount += 1
-					if threadCount > threadLimit {
-						log.Printf("current thread cnt = %v\n", threadCount)
-					}
-					go func(config defaultConfig, member memberData) {
-						downloadForMember(&config, &member)
+				if !downloadTable[idx] {
+					downloadTable[idx] = true
+					go func(idx int, src streamSource) {
+						downloadVideo(&src)
 						downloadTableMtx.Lock()
 						defer downloadTableMtx.Unlock()
-						downloadTable[member.Id] = false
-						threadCount -= 1
-					}(configs.DefaultConfigs, member)
+						downloadTable[idx] = false
+					}(idx, src)
 				}
 				time.Sleep(1300 * time.Millisecond)
 			}()
 		}
-		time.Sleep(5300 * time.Millisecond)
+		time.Sleep(1700 * time.Millisecond)
 	}
-}
-
-func downloadForMember(config *defaultConfig, member *memberData) {
-	var wg sync.WaitGroup
-	for _, src := range buildStreamSources(config, member) {
-		wg.Add(1)
-		go func(src streamSource) {
-			defer wg.Done()
-			downloadVideo(&src)
-		}(src)
-		time.Sleep(1100 * time.Millisecond)
-	}
-	wg.Wait()
 }
 
 func downloadVideo(src *streamSource) {
 	filename := fmt.Sprintf("%v%v", src.filename, time.Now().Format("2006.01.02 15.04.05"))
 	tempOutfilePath := filepath.Join(tempFolderPath, fmt.Sprintf("%v.mp4", filename))
 	if err := exec.Command("ffmpeg", "-i", src.url, "-c", "copy", tempOutfilePath).Run(); err != nil {
-		log.Printf("download video failed, name = %v, err = %v\n", src.name, err)
+		log.Printf("download video failed, name = %v, url = %v, err = %v\n", src.name, src.url, err)
 		return
 	}
 	if !src.checkOnly {
