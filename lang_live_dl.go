@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -168,7 +169,9 @@ func startDownloadThread(sources []streamSource, downloadTable []int32) {
 			func() {
 				if atomic.CompareAndSwapInt32(&downloadTable[idx], 0, 1) {
 					go func(idx int, src streamSource) {
-						downloadVideo(&src)
+						if pingUrl(src.url) {
+							downloadVideo(&src)
+						}
 						atomic.StoreInt32(&downloadTable[idx], 0)
 					}(idx, src)
 				}
@@ -178,11 +181,23 @@ func startDownloadThread(sources []streamSource, downloadTable []int32) {
 	}
 }
 
+func pingUrl(url string) bool {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode/100 == 2
+}
+
 func downloadVideo(src *streamSource) {
 	filename := fmt.Sprintf("%v%v", src.filename, time.Now().Format("2006.01.02 15.04.05"))
 	tempOutfilePath := filepath.Join(tempFolderPath, fmt.Sprintf("%v.mp4", filename))
 	if err := exec.Command("ffmpeg", "-i", src.url, "-c", "copy", tempOutfilePath).Run(); err != nil {
-		// log.Printf("download video failed, name = %v, url = %v, err = %v\n", src.name, src.url, err)
+		log.Printf("download video failed, name = %v, url = %v, err = %v\n", src.name, src.url, err)
 		return
 	}
 	if !src.checkOnly {
