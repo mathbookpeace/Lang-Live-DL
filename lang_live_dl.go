@@ -178,10 +178,9 @@ func startDownloadThread(sources []streamSource, downloadTable []bool) {
 						downloadTable[idx] = false
 					}(idx, src)
 				}
-				time.Sleep(1300 * time.Millisecond)
+				time.Sleep(time.Duration(20000/len(sources)) * time.Millisecond)
 			}()
 		}
-		time.Sleep(1700 * time.Millisecond)
 	}
 }
 
