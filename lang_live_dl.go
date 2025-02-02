@@ -188,7 +188,7 @@ func downloadVideo(src *streamSource) {
 	filename := fmt.Sprintf("%v%v", src.filename, time.Now().Format("2006.01.02 15.04.05"))
 	tempOutfilePath := filepath.Join(tempFolderPath, fmt.Sprintf("%v.mp4", filename))
 	if err := exec.Command("ffmpeg", "-i", src.url, "-c", "copy", tempOutfilePath).Run(); err != nil {
-		log.Printf("download video failed, name = %v, url = %v, err = %v\n", src.name, src.url, err)
+		// log.Printf("download video failed, name = %v, url = %v, err = %v\n", src.name, src.url, err)
 		return
 	}
 	if !src.checkOnly {
