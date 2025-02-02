@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -130,10 +130,10 @@ func createFolders() {
 	}
 }
 
-func initDownloadTable(sources []streamSource) []bool {
-	downloadTable := make([]bool, len(sources))
+func initDownloadTable(sources []streamSource) []int32 {
+	downloadTable := make([]int32, len(sources))
 	for i := 0; i < len(sources); i++ {
-		downloadTable[i] = false
+		downloadTable[i] = 0
 	}
 	return downloadTable
 }
@@ -162,20 +162,14 @@ func buildStreamSources(configs configs) []streamSource {
 	return sources
 }
 
-func startDownloadThread(sources []streamSource, downloadTable []bool) {
-	var downloadTableMtx sync.Mutex
+func startDownloadThread(sources []streamSource, downloadTable []int32) {
 	for {
 		for idx, src := range sources {
 			func() {
-				downloadTableMtx.Lock()
-				defer downloadTableMtx.Unlock()
-				if !downloadTable[idx] {
-					downloadTable[idx] = true
+				if atomic.CompareAndSwapInt32(&downloadTable[idx], 0, 1) {
 					go func(idx int, src streamSource) {
 						downloadVideo(&src)
-						downloadTableMtx.Lock()
-						defer downloadTableMtx.Unlock()
-						downloadTable[idx] = false
+						atomic.StoreInt32(&downloadTable[idx], 0)
 					}(idx, src)
 				}
 				time.Sleep(time.Duration(20000/len(sources)) * time.Millisecond)
